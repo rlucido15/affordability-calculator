@@ -383,6 +383,8 @@
 /* CTAs now sit on the light zone — restore the standard light-panel treatment */
 #moxie-afford .mx-darkzone .mx-cta2{background:var(--moxie-surface-alt);border-color:var(--moxie-primary);color:var(--moxie-primary)}
 #moxie-afford .mx-darkzone .mx-cta2:hover{background:var(--moxie-primary-20)}
+#moxie-afford .mx-cta2note{font-size:12.5px;color:var(--moxie-ink-60);margin-top:8px;line-height:1.4}
+#moxie-afford .mx-cta2note[hidden]{display:none}
 
 /* CTAs */
 #moxie-afford .mx-ctas{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
@@ -637,6 +639,7 @@
       <a class="mx-cta1" id="mxCta1" href="https://apply.moxiemortgage.com" target="_blank" rel="noopener">Get pre-approved</a>
       <a class="mx-cta2" id="mxCta2" target="_top" href="mailto:hello@moxiemortgage.com?subject=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
     </div>
+    <div class="mx-cta2note" id="mxCta2Note" role="status" hidden></div>
 
     </div><!-- /.mx-darkzone -->
 
@@ -1243,7 +1246,7 @@ $("mxCta1").addEventListener("click", function(){
   this.href = "https://apply.moxiemortgage.com?" + ctaParams();
   track("cta_clicked",{which:"pre_approval", result_state:resultState(lastResult)});
 });
-function updateLoanOfficerMailto(){
+function loanOfficerMailtoHref(){
   var r = lastResult || calculate(state);
   var body =
     "I'd like to speak with a loan officer about buying a home.\n\n" +
@@ -1253,13 +1256,35 @@ function updateLoanOfficerMailto(){
     "- Cash to buy: " + fmt$(state.cash) + "\n" +
     "- Yearly income: " + fmt$(state.income) + "\n\n" +
     "Please reach out when you have a moment. Thanks!";
-  $("mxCta2").href = "mailto:hello@moxiemortgage.com" +
+  return "mailto:hello@moxiemortgage.com" +
     "?subject=" + encodeURIComponent("I would like to speak with a Loan Officer") +
     "&body=" + encodeURIComponent(body);
 }
-$("mxCta2").addEventListener("click", function(){
-  // href is already current (kept fresh in recalc); this only logs the click.
+function updateLoanOfficerMailto(){
+  $("mxCta2").href = loanOfficerMailtoHref();
+}
+$("mxCta2").addEventListener("click", function(e){
   track("cta_clicked",{which:"loan_officer", result_state:resultState(lastResult)});
+  var href = loanOfficerMailtoHref();
+  // Inside an iframe the anchor's default navigation is often swallowed, so
+  // drive it explicitly. Try the top window first (escapes the frame), then a
+  // normal assign, then a blank-tab open. If everything is blocked, fall back
+  // to copying the address so the click is never a dead end.
+  e.preventDefault();
+  var opened = false;
+  try { if (window.top && window.top !== window) { window.top.location.href = href; opened = true; } } catch (err) {}
+  if (!opened) { try { window.location.href = href; opened = true; } catch (err) {} }
+  if (!opened) { try { var w = window.open(href, "_blank"); opened = !!w; } catch (err) {} }
+  if (!opened) {
+    var addr = "hello@moxiemortgage.com";
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(addr);
+      }
+    } catch (err) {}
+    var note = $("mxCta2Note");
+    if (note) { note.textContent = "Couldn't open your email app. Copied " + addr + " to your clipboard."; note.hidden = false; }
+  }
 });
 
 // reveal: one-time. After this the panel stays live on every input change.

@@ -1,0 +1,1488 @@
+<!--
+===============================================================================
+  MOXIE MORTGAGE — HOME AFFORDABILITY CALCULATOR
+  Single self-contained file. Paste into a Lofty CMS "Custom HTML" block.
+===============================================================================
+
+  HOW TO INSTALL (non-developer)
+  ------------------------------
+  1. In Lofty, edit the page and add a "Custom HTML" / "Embed Code" block.
+  2. Open this file in any plain-text editor (Notepad, TextEdit).
+  3. Select all, copy, and paste the entire contents into that block. Save.
+  4. Everything is self-contained. The only external request is one font link
+     (line ~40). Delete that line and it falls back to system fonts.
+
+  TOKENS TO REPLACE — search for each string
+  ------------------------------------------
+  [PRIMARY_LOGO]     header logo img src            → search: PRIMARY_LOGO
+  [LOGO_REVERSED]    white logo for dark footer     → search: LOGO_REVERSED
+  [FAVICON_MARK]     square mark, mobile bar        → search: FAVICON_MARK
+  [PARTNER_LOGOS]    NEXA / EHL / NMLS badges       → search: PARTNER_LOGOS
+  [CRM_ENDPOINT]     lead POST destination          → search: CRM_ENDPOINT
+
+  WHERE TO SWAP COLORS
+  --------------------
+  All brand colors live in ONE place: the ":root" variable block at the top of
+  the <style> tag (search: BRAND TOKENS). Change the hex values there and the
+  whole calculator updates. Do not hunt for colors anywhere else.
+
+  WHERE THE CRM ENDPOINT GOES
+  ---------------------------
+  In the <script>, search: CRM_ENDPOINT. Set CONFIG.crmEndpoint to your POST
+  URL. While it is null, leads are logged to the browser console instead of
+  sent, and the form still shows a success message so you can demo it safely.
+
+  INTEREST RATE
+  -------------
+  The rate is a plain user-controlled slider. It is NOT derived from the
+  credit score field and the calculator does not present it as a Moxie quote.
+  DEFAULT_RATE in the script sets only where the slider opens; change that one
+  constant if the opening position should be different. There is no rate feed
+  and no network call.
+
+  CREDIT SCORE
+  ------------
+  The credit score field does not affect any number on the page. It is
+  collected for the lead record so a loan officer knows the borrower's
+  approximate profile before they call.
+
+  HOSTING ON GITHUB PAGES + EMBEDDING AS AN IFRAME
+  ------------------------------------------------
+  1. Put this file in a GitHub repo as index.html (or calculator.html).
+  2. Repo Settings > Pages > deploy from the branch's root. You'll get a URL
+     like https://YOURNAME.github.io/REPO/
+  3. In the Lofty Custom HTML block, paste BOTH the iframe and the script:
+
+     <iframe id="moxie-afford-frame"
+             src="https://YOURNAME.github.io/REPO/"
+             style="width:100%;border:0;display:block"
+             height="1200" loading="lazy"
+             title="Home affordability calculator"></iframe>
+     <script>
+     window.addEventListener("message", function(e){
+       if(!e.data || e.data.type !== "moxie-afford:height") return;
+       var f = document.getElementById("moxie-afford-frame");
+       if(f) f.height = e.data.height;
+     });
+     </script>
+
+  Notes on the iframe route:
+  - This file posts its height to the parent whenever it changes, so the frame
+    grows and shrinks with the content. Without the parent script above you
+    will get a fixed-height frame with an inner scrollbar.
+  - Sticky positioning is disabled automatically when framed. Inside a frame,
+    a sticky element pins to the frame, not the page, so it looks frozen. The
+    results panel scrolls normally instead.
+  - The height attribute (1200) is only the pre-script fallback. Set it near
+    the real height so there's no visible jump on load.
+  - Framing means the calculator cannot read or change the host page. That is
+    good for safety and means the namespacing notes below matter less.
+  - The URL-sharing feature writes to the FRAME's address bar, not the page's,
+    so shareable result links are effectively disabled when framed. If you
+    want them, embed the file inline instead.
+
+  MINIMAL FALLBACK VERSION
+  ------------------------
+  If the Lofty theme fights this build, add class "moxie-minimal" to the root
+  div: <div id="moxie-afford" class="moxie-minimal">. That disables animation,
+  sticky positioning, and web fonts. Search: MINIMAL FALLBACK.
+
+===============================================================================
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<div id="moxie-afford">
+<style>
+/* ==========================================================================
+   BRAND TOKENS — change colors here and nowhere else
+   ========================================================================== */
+#moxie-afford{
+  /* Brand cyan #28B5CF is the identity color, but at 2.5:1 on white it fails
+     WCAG AA for text. --moxie-primary is a DARKENED cyan used wherever a color
+     must be readable (price, CTA fill, wordmark). --moxie-brand is the true
+     brand cyan, used for FILLS only (bars, chart segments). If the brand color
+     ever changes, update both together. */
+  --moxie-primary:#10798F;          /* readable cyan — text and CTA fill */
+  --moxie-primary-deep:#0B6577;     /* CTA hover */
+  --moxie-brand:#28B5CF;            /* [BRAND_PRIMARY] true brand cyan — fills only */
+  --moxie-primary-10:#E9F7FA;
+  --moxie-primary-20:#C5E9F1;
+  --moxie-primary-60:#5FA9BC;
+  --moxie-accent:#F46744;           /* [BRAND_ACCENT] input slider handles, focus */
+  --moxie-ink:#14181F;              /* [BRAND_INK] */
+  --moxie-ink-60:#5C616B;
+  --moxie-ink-30:#A7ABB3;
+  --moxie-ink-12:#DFE1E5;
+  --moxie-surface:#FFFFFF;          /* [BRAND_SURFACE] workspace background */
+  --moxie-surface-alt:#FFFFFF;      /* [BRAND_SURFACE_ALT] fields, chips */
+  --moxie-panel:#FBFAF8;            /* left input column background */
+  --moxie-rightcol:#0c2330;         /* right results panel — navy, matches the reviews block; the
+                                       payment box (--moxie-ink) sits deeper */
+  --moxie-zone-comfortable:#1F8A5B; /* [ZONE_COMFORTABLE] */
+  --moxie-zone-moderate:#C9971F;    /* [ZONE_MODERATE] middle band */
+  --moxie-zone-stretching:#F46744;  /* [ZONE_STRETCHING] top band — brand coral */
+  --moxie-danger:#B4381C;           /* readable error text — coral fails AA at text sizes */
+  --moxie-header-offset:0px;        /* raise if Lofty renders a fixed header */
+  --moxie-display:'Barlow',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --moxie-body:'Barlow',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;
+  --moxie-r:10px;
+}
+/* MINIMAL FALLBACK */
+#moxie-afford.moxie-minimal{--moxie-display:system-ui,sans-serif;--moxie-body:system-ui,sans-serif}
+#moxie-afford.moxie-minimal *{transition:none!important;animation:none!important}
+#moxie-afford.moxie-minimal .mx-results{position:static!important}
+#moxie-afford.moxie-minimal .mx-mobilebar,#moxie-afford.moxie-minimal .mx-mobilecta{display:none!important}
+
+/* Own the box model locally only */
+#moxie-afford,#moxie-afford *,#moxie-afford *::before,#moxie-afford *::after{box-sizing:border-box}
+#moxie-afford *{margin:0;padding:0}
+#moxie-afford{
+  container-type:inline-size;
+  font-family:var(--moxie-body);
+  font-size:15px;line-height:1.5;color:var(--moxie-ink);
+  background:var(--moxie-surface);
+  -webkit-font-smoothing:antialiased;
+  border-radius:var(--moxie-r);
+}
+/* padding lives here, not on the root: the root is the query container and
+   cannot be styled by its own container queries */
+#moxie-afford .mx-inner{padding:28px clamp(20px,6cqi,88px);max-width:1500px;margin:0 auto}
+#moxie-afford .mx-num{font-variant-numeric:tabular-nums lining-nums;font-feature-settings:"tnum" 1,"lnum" 1}
+#moxie-afford button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+#moxie-afford input,#moxie-afford select{font:inherit;color:inherit}
+#moxie-afford a{color:var(--moxie-primary)}
+#moxie-afford :focus-visible{outline:3px solid var(--moxie-accent);outline-offset:2px;border-radius:4px}
+#moxie-afford .mx-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* ---------- header ---------- */
+#moxie-afford .mx-wordmark{font-family:var(--moxie-display);font-weight:600;font-size:20px;letter-spacing:-.01em;color:#FFFFFF}
+#moxie-afford .mx-promo-brand{margin-top:28px;padding-top:18px;border-top:1px solid rgba(255,255,255,.14);text-align:right}
+#moxie-afford .mx-promo-nmls{font-size:11.5px;color:#9CA3AC;margin-top:3px}
+#moxie-afford .mx-title{font-family:var(--moxie-display);font-weight:600;font-size:clamp(22px,3.4cqi,30px);letter-spacing:-.015em;line-height:1.2;margin-bottom:20px}
+
+/* ---------- grid ---------- */
+#moxie-afford .mx-grid{display:grid;grid-template-columns:1fr;gap:24px}
+@container (min-width:1024px){
+  #moxie-afford .mx-grid{grid-template-columns:minmax(0,42fr) minmax(0,58fr);gap:clamp(28px,5cqi,64px);align-items:start}
+  #moxie-afford .mx-results{position:sticky;top:calc(var(--moxie-header-offset) + 16px)}
+  #moxie-afford.mx-framed .mx-results{position:static}
+}
+
+/* ---------- inputs ---------- */
+#moxie-afford .mx-leftcol{display:flex;flex-direction:column;gap:20px;min-width:0}
+#moxie-afford .mx-inputs{background:var(--moxie-panel);border:1px solid var(--moxie-ink-12);border-radius:14px;padding:22px 24px}
+
+/* ---------- reviews box (ported from the standalone Reviews component) ---------- */
+#moxie-afford .mxc-reviews[hidden]{display:none}
+#moxie-afford .mxc-reviews{
+  --mxc-ink-900:#0c2330;--mxc-ink-700:#2b4150;--mxc-ink-500:#5b6f7c;--mxc-brand-500:#28b5cf;
+  --mxc-line:#dfe7ec;--mxc-line-strong:#7f909b;--mxc-s2:8px;--mxc-s3:12px;--mxc-s4:16px;--mxc-s5:24px;--mxc-s6:32px;
+  --mxc-r-md:12px;--mxc-r-lg:16px;--mxc-shadow-sm:0 1px 2px rgba(12,35,48,.04);
+  background:var(--mxc-ink-900);color:#fff;border-radius:var(--mxc-r-lg);padding:var(--mxc-s5);
+  box-shadow:var(--mxc-shadow-sm);overflow:hidden;
+  font-family:"Barlow",ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+@container (min-width:640px){#moxie-afford .mxc-reviews{padding:var(--mxc-s5) var(--mxc-s6)}}
+#moxie-afford .mxc-reviews-title{font-size:1rem;font-weight:400;line-height:1.4;letter-spacing:-.01em;margin:0 0 var(--mxc-s4);color:#eef3f6}
+#moxie-afford .mxc-reviews-title strong{font-weight:650;color:#fff}
+#moxie-afford .mxc-reviews-title-em{display:block;margin-top:2px}
+#moxie-afford .mxc-reviews-head{display:flex;align-items:center;justify-content:space-between;gap:var(--mxc-s2);margin-bottom:var(--mxc-s3);flex-wrap:wrap}
+#moxie-afford .mxc-reviews-brand{display:inline-flex;align-items:center;gap:6px}
+#moxie-afford .mxc-reviews-brandtext{font-size:.8125rem;font-weight:600;color:#c6d3da}
+#moxie-afford .mxc-reviews-rating{display:inline-flex;align-items:center;gap:var(--mxc-s2)}
+#moxie-afford .mxc-reviews-stars{color:#fbbc05;font-size:.9375rem;letter-spacing:1px}
+#moxie-afford .mxc-reviews-score{font-size:.8125rem;font-weight:600;color:#c6d3da}
+#moxie-afford .mxc-carousel{overflow:hidden}
+#moxie-afford .mxc-carousel-track{display:flex;list-style:none;margin:0;padding:0;transition:transform .5s ease}
+@media (prefers-reduced-motion:reduce){#moxie-afford .mxc-carousel-track{transition:none}}
+#moxie-afford .mxc-carousel-slide{flex:0 0 100%;min-width:0;box-sizing:border-box}
+#moxie-afford .mxc-review-card{display:flex;flex-direction:column;gap:var(--mxc-s3);padding:var(--mxc-s4);min-height:132px;
+  background:#fff;border:1px solid var(--mxc-line);border-radius:var(--mxc-r-md);text-decoration:none;color:inherit;
+  transition:background .15s ease,border-color .15s ease,box-shadow .15s ease}
+#moxie-afford .mxc-review-card:hover{box-shadow:var(--mxc-shadow-sm);border-color:var(--mxc-line-strong)}
+#moxie-afford .mxc-review-card:focus-visible{outline:2px solid var(--mxc-brand-500);outline-offset:2px}
+#moxie-afford .mxc-review-quote{margin:0;font-size:.875rem;line-height:1.5;color:var(--mxc-ink-900);
+  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+#moxie-afford .mxc-review-author{display:flex;align-items:center;gap:var(--mxc-s2);margin-top:auto}
+#moxie-afford .mxc-review-avatar{width:36px;height:36px;border-radius:999px;flex:none;object-fit:cover;background:var(--mxc-line)}
+#moxie-afford .mxc-review-avatar-fallback{display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:650;color:#fff;text-transform:uppercase;background:var(--mxc-brand-500)}
+#moxie-afford .mxc-review-meta{display:flex;flex-direction:column;min-width:0;flex:1}
+#moxie-afford .mxc-review-name{font-size:.8125rem;font-weight:650;color:var(--mxc-ink-900)}
+#moxie-afford .mxc-review-sub{font-size:.6875rem;color:var(--mxc-ink-500)}
+#moxie-afford .mxc-review-g{flex:none;opacity:.9}
+#moxie-afford .mxc-carousel-controls{display:flex;align-items:center;justify-content:space-between;gap:var(--mxc-s2);margin-top:var(--mxc-s3)}
+#moxie-afford .mxc-carousel-toggle{font:inherit;font-size:.75rem;font-weight:600;color:#c6d3da;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:5px 12px;min-height:30px;cursor:pointer}
+#moxie-afford .mxc-carousel-toggle:hover{color:#fff;background:rgba(255,255,255,.14)}
+#moxie-afford .mxc-carousel-toggle:focus-visible{outline:2px solid var(--mxc-brand-500);outline-offset:2px}
+#moxie-afford .mxc-carousel-dots{display:inline-flex;gap:6px}
+#moxie-afford .mxc-carousel-dot{width:8px;height:8px;padding:0;border-radius:999px;cursor:pointer;background:rgba(255,255,255,.25);border:0;transition:background .15s ease,transform .15s ease}
+#moxie-afford .mxc-carousel-dot:hover{background:rgba(255,255,255,.45)}
+#moxie-afford .mxc-carousel-dot.is-active{background:var(--mxc-brand-500);transform:scale(1.25)}
+#moxie-afford .mxc-carousel-dot:focus-visible{outline:2px solid var(--mxc-brand-500);outline-offset:2px}
+#moxie-afford .mxc-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+#moxie-afford .mx-field{padding:13px 0;border-bottom:1px solid var(--moxie-ink-12)}
+#moxie-afford .mx-field:last-of-type{border-bottom:none;padding-bottom:4px}
+#moxie-afford .mx-pair{display:grid;grid-template-columns:1fr 1fr;gap:8px 20px;align-items:start}
+#moxie-afford .mx-note-span{grid-column:1 / -1;margin-top:0;display:block}
+#moxie-afford .mx-wide{max-width:none;width:100%}
+#moxie-afford select.mx-txt{height:38px;cursor:pointer}
+@container (max-width:640px){#moxie-afford .mx-pair{grid-template-columns:1fr;gap:16px}}
+#moxie-afford .mx-field:first-child{padding-top:0}
+#moxie-afford .mx-lab{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:500;margin-bottom:8px}
+#moxie-afford .mx-help-btn{width:18px;height:18px;border-radius:50%;border:1px solid var(--moxie-ink-30);color:var(--moxie-ink-60);font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;flex:none}
+#moxie-afford .mx-help-btn:hover{border-color:var(--moxie-ink);color:var(--moxie-ink)}
+#moxie-afford .mx-pop{display:none;font-size:13px;line-height:1.45;color:var(--moxie-ink-60);background:var(--moxie-primary-10);border-radius:8px;padding:10px 12px;margin-bottom:10px}
+#moxie-afford .mx-pop.mx-open{display:block}
+#moxie-afford .mx-inputrow{display:flex;align-items:center;gap:12px}
+#moxie-afford .mx-txt{width:100%;max-width:170px;padding:9px 11px;border:1px solid var(--moxie-ink-12);border-radius:8px;background:var(--moxie-surface-alt);font-variant-numeric:tabular-nums lining-nums;font-weight:500}
+#moxie-afford .mx-txt:hover{border-color:var(--moxie-ink-30)}
+#moxie-afford .mx-note{font-size:12.5px;color:var(--moxie-ink-60);margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#moxie-afford .mx-linkbtn{font-size:12.5px;color:var(--moxie-primary);text-decoration:underline;text-underline-offset:2px}
+
+/* range inputs — input sliders use accent handle */
+#moxie-afford .mx-range{-webkit-appearance:none;appearance:none;width:100%;height:34px;background:transparent;flex:1;min-width:0}
+#moxie-afford .mx-range::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:var(--moxie-ink-12)}
+#moxie-afford .mx-range::-moz-range-track{height:6px;border-radius:3px;background:var(--moxie-ink-12)}
+#moxie-afford .mx-range::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--moxie-primary);border:2px solid var(--moxie-surface-alt);box-shadow:0 0 0 1px var(--moxie-primary-deep);margin-top:-8px;cursor:grab}
+#moxie-afford .mx-range::-moz-range-thumb{width:22px;height:22px;border-radius:50%;background:var(--moxie-primary);border:2px solid var(--moxie-surface-alt);box-shadow:0 0 0 1px var(--moxie-primary-deep);cursor:grab}
+
+/* advanced disclosure */
+#moxie-afford .mx-adv{margin-top:0;border-top:1px solid var(--moxie-ink-12)}
+#moxie-afford .mx-adv-head{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0 4px;text-align:left}
+#moxie-afford .mx-adv-title{font-size:14px;font-weight:500}
+#moxie-afford .mx-adv-summary{font-size:12.5px;color:var(--moxie-ink-60);font-variant-numeric:tabular-nums lining-nums}
+#moxie-afford .mx-adv-body{display:none;padding:4px 0 6px}
+#moxie-afford .mx-adv-body.mx-open{display:block}
+#moxie-afford .mx-adv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin-top:14px}
+#moxie-afford .mx-adv-grid label{display:block;font-size:12.5px;color:var(--moxie-ink-60);margin-bottom:5px}
+#moxie-afford .mx-adv-grid input,#moxie-afford .mx-adv-grid select{width:100%;padding:7px 9px;border:1px solid var(--moxie-ink-12);border-radius:7px;background:var(--moxie-surface-alt);font-size:13.5px}
+
+/* reveal CTA */
+#moxie-afford .mx-reveal{display:block;width:100%;margin-top:18px;background:var(--moxie-primary);color:#FFFFFF;
+  font-family:var(--moxie-display);font-weight:600;font-size:16px;padding:14px 20px;border-radius:9px;letter-spacing:.005em}
+#moxie-afford .mx-reveal:hover{background:var(--moxie-primary-deep)}
+#moxie-afford .mx-reveal[hidden]{display:none}
+
+/* promo panel shown before reveal */
+/* the panel goes dark until the results are revealed (class toggled in JS) */
+#moxie-afford .mx-results.mx-dark{background:var(--moxie-rightcol)}
+#moxie-afford .mx-promo-h{font-family:var(--moxie-display);font-weight:600;font-size:clamp(24px,3.8cqi,34px);
+  line-height:1.18;letter-spacing:-.015em;color:#FFFFFF}
+#moxie-afford .mx-promo-list{list-style:none;margin-top:22px}
+#moxie-afford .mx-promo-list li{position:relative;padding-left:26px;font-size:15px;line-height:1.5;
+  margin-bottom:14px;color:#E6E8EB}
+#moxie-afford .mx-promo-list li::before{content:"";position:absolute;left:2px;top:7px;width:9px;height:9px;
+  border-radius:2px;background:var(--moxie-brand)}
+#moxie-afford .mx-promo-fine{font-size:13px;color:#9CA3AC;margin-top:20px}
+
+/* ---------- results panel ---------- */
+#moxie-afford .mx-results{background:var(--moxie-rightcol);border-radius:14px;padding:28px 26px;min-width:0;box-shadow:0 1px 2px rgba(20,24,31,.06),0 12px 34px -20px rgba(20,24,31,.6)}
+#moxie-afford .mx-price{font-family:var(--moxie-display);font-weight:600;font-size:clamp(36px,7cqi,60px);line-height:1.04;letter-spacing:-.02em;color:#FFFFFF}
+#moxie-afford .mx-chip[hidden]{display:none}
+#moxie-afford .mx-chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:#AEB6C0;margin-top:7px}
+#moxie-afford .mx-chip i{width:7px;height:7px;border-radius:50%;background:var(--moxie-ink-30);font-style:normal;flex:none}
+
+/* comfort slider — signature element. Ink handle for equal contrast on all zones. */
+#moxie-afford .mx-comfort-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:26px 4px 12px}
+#moxie-afford .mx-comfort-lab{font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:500;color:#AEB6C0}
+#moxie-afford .mx-comfort-hint{font-size:12.5px;color:var(--moxie-brand);font-weight:500}
+#moxie-afford .mx-comfort{margin:0 14px;position:relative;cursor:grab;padding:3px 0}
+#moxie-afford .mx-comfort:active{cursor:grabbing}
+#moxie-afford .mx-track{display:flex;height:11px;border-radius:6px;overflow:hidden}
+#moxie-afford .mx-track span{height:100%;opacity:.34;transition:opacity .15s}
+#moxie-afford .mx-comfort[data-zone="0"] .mx-track span:nth-child(1),
+#moxie-afford .mx-comfort[data-zone="1"] .mx-track span:nth-child(2),
+#moxie-afford .mx-comfort[data-zone="2"] .mx-track span:nth-child(3){opacity:1}
+#moxie-afford .mx-handle{position:absolute;top:-8px;width:28px;height:28px;border-radius:50%;background:#FFFFFF;
+  border:2px solid #FFFFFF;box-shadow:0 2px 8px rgba(0,0,0,.45);pointer-events:none;transform:translateX(-14px);
+  display:flex;align-items:center;justify-content:center;gap:3px;transition:width .12s,height .12s,top .12s}
+#moxie-afford .mx-handle i{width:2px;height:10px;border-radius:1px;background:#0c2330;display:block}
+#moxie-afford .mx-comfort.mx-dragging .mx-handle{width:32px;height:32px;top:-10px;transform:translateX(-16px)}
+#moxie-afford .mx-comfort-input{position:absolute;left:0;top:-14px;width:100%;height:44px;opacity:0;margin:0;cursor:inherit}
+#moxie-afford .mx-comfort-input:focus-visible + .mx-handle{outline:3px solid var(--moxie-accent);outline-offset:3px}
+#moxie-afford .mx-tip{position:absolute;top:-44px;transform:translateX(-50%);background:var(--moxie-ink);color:#fff;
+  font-size:12.5px;padding:5px 10px;border-radius:6px;white-space:nowrap;opacity:0;transition:opacity .12s;
+  pointer-events:none;font-variant-numeric:tabular-nums lining-nums;z-index:2}
+#moxie-afford .mx-comfort.mx-dragging .mx-tip{opacity:1}
+
+/* zone names sit under their own segment and double as jump targets */
+#moxie-afford .mx-zonebar{display:flex;margin:9px 14px 0}
+#moxie-afford .mx-zb{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;font-weight:500;
+  color:#828A94;text-align:left;padding:3px 0;transition:color .15s;min-width:0}
+#moxie-afford .mx-zb:nth-child(2){text-align:center}
+#moxie-afford .mx-zb:nth-child(3){text-align:right}
+#moxie-afford .mx-zb:hover{color:#AEB6C0}
+#moxie-afford .mx-zb.mx-on{color:#FFFFFF}
+#moxie-afford .mx-ends{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin:11px 14px 0;
+  font-size:12px;color:#AEB6C0;min-height:34px}
+#moxie-afford .mx-ends b{display:block;font-size:14px;font-weight:500;color:#FFFFFF;
+  font-variant-numeric:tabular-nums lining-nums}
+#moxie-afford .mx-ends span:nth-child(3){text-align:right}
+#moxie-afford .mx-zone-sub{flex:1;text-align:center;font-size:13px;color:#E6E8EB;line-height:1.35;align-self:center}
+@container (max-width:560px){
+  #moxie-afford .mx-ends{flex-wrap:wrap}
+  #moxie-afford .mx-zone-sub{order:3;flex-basis:100%;text-align:left;margin-top:6px}
+}
+
+/* result blocks */
+#moxie-afford .mx-block{margin-top:20px;padding-top:18px;border-top:1px solid var(--moxie-primary-20)}
+#moxie-afford .mx-block-lab{font-size:13px;color:var(--moxie-ink-60)}
+#moxie-afford .mx-pay{font-family:var(--moxie-display);font-weight:500;font-size:clamp(24px,4.2cqi,32px);letter-spacing:-.015em;line-height:1.15}
+#moxie-afford .mx-bar{display:flex;height:11px;border-radius:6px;overflow:hidden;margin-top:13px;background:var(--moxie-ink-12)}
+#moxie-afford .mx-bar span{height:100%;transition:flex-basis .2s ease-out}
+#moxie-afford .mx-legend{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:12px}
+#moxie-afford .mx-legend div{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--moxie-ink-60)}
+#moxie-afford .mx-legend i{width:9px;height:9px;border-radius:2px;flex:none;font-style:normal}
+#moxie-afford .mx-legend b{font-weight:500;color:var(--moxie-ink);font-variant-numeric:tabular-nums lining-nums}
+#moxie-afford .mx-row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;font-size:14px}
+#moxie-afford .mx-row:last-child{border-bottom:none}
+#moxie-afford .mx-row span:last-child{font-weight:500;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
+#moxie-afford .mx-row small{display:block;font-size:12px;color:var(--moxie-ink-60);font-weight:400}
+#moxie-afford .mx-short{background:#FEF0EC;border-left:3px solid var(--moxie-zone-stretching);border-radius:0 8px 8px 0;padding:11px 13px;margin-top:12px;font-size:13.5px;line-height:1.45}
+#moxie-afford .mx-levers-box{background:var(--moxie-primary-deep);border-radius:12px;padding:15px 17px;margin-top:20px}
+#moxie-afford .mx-levers-box .mx-block-lab{color:#B8E4EE;font-weight:500;margin-bottom:4px}
+#moxie-afford .mx-lever{display:flex;gap:9px;font-size:13.5px;line-height:1.45;padding:5px 0;color:#FFFFFF}
+#moxie-afford .mx-lever b{color:#FFFFFF}
+#moxie-afford .mx-lever i{color:#B8E4EE}
+#moxie-afford .mx-lever span[style]{color:#B8E4EE!important}
+#moxie-afford .mx-lever b{font-weight:500;font-variant-numeric:tabular-nums lining-nums;white-space:nowrap}
+#moxie-afford .mx-lever i{font-style:normal;flex:none;font-weight:600}
+
+/* results detail zone — light surface; only the levers box stays dark */
+#moxie-afford .mx-darkzone{background:var(--moxie-surface-alt);border:1px solid var(--moxie-ink-12);border-radius:12px;padding:6px 20px 20px;margin-top:22px}
+#moxie-afford .mx-darkzone .mx-block{border-top-color:var(--moxie-ink-12)}
+#moxie-afford .mx-darkzone .mx-block-first{border-top:none;margin-top:16px;padding-top:0}
+#moxie-afford .mx-darkzone .mx-block-lab{color:var(--moxie-ink-60);font-size:11.5px;letter-spacing:.11em;text-transform:uppercase;font-weight:500}
+#moxie-afford .mx-payrow{display:flex;align-items:baseline;justify-content:flex-start;gap:14px;flex-wrap:wrap}
+#moxie-afford .mx-payrow .mx-block-lab{flex:0 0 auto}
+#moxie-afford .mx-darkzone .mx-pay{color:var(--moxie-ink);text-align:left;flex:0 0 auto}
+#moxie-afford .mx-darkzone .mx-bar{background:var(--moxie-ink-12)}
+#moxie-afford .mx-darkzone .mx-legend div{color:var(--moxie-ink-60);font-size:13px}
+#moxie-afford .mx-darkzone .mx-legend b{color:var(--moxie-ink)}
+#moxie-afford .mx-darkzone .mx-block-cash{margin-top:14px;padding-top:8px}
+#moxie-afford .mx-darkzone #mxCashRows{margin-top:0}
+#moxie-afford .mx-darkzone #mxCashRows .mx-row:first-child{padding-top:4px}
+#moxie-afford .mx-darkzone .mx-row{color:var(--moxie-ink);font-size:15px;font-weight:400;padding:11px 0;
+  border-bottom:1px solid var(--moxie-ink-12);align-items:baseline}
+#moxie-afford .mx-darkzone .mx-row:last-child{border-bottom:none;padding-bottom:2px}
+#moxie-afford .mx-darkzone .mx-row span:last-child{font-weight:500;font-size:16px;color:var(--moxie-ink)}
+#moxie-afford .mx-darkzone .mx-row small{color:var(--moxie-ink-60);font-size:12.5px;margin-top:2px;line-height:1.4}
+#moxie-afford .mx-darkzone .mx-short{background:#FEF0EC;color:#7A2E17;border-left-color:#F46744;font-size:14.5px;line-height:1.55;padding:14px 16px}
+#moxie-afford .mx-darkzone .mx-short b{color:var(--moxie-ink)}
+/* levers box — the one element that stays dark */
+#moxie-afford .mx-darkzone .mx-levers-box{background:#0c2330;margin-top:22px;padding:18px 20px;border-radius:12px}
+#moxie-afford .mx-darkzone .mx-levers-box .mx-block-lab{color:#B4BCC6;margin-bottom:9px}
+#moxie-afford .mx-darkzone .mx-lever{color:#F2F4F6;font-size:15px;line-height:1.55;padding:7px 0;gap:11px}
+#moxie-afford .mx-darkzone .mx-lever + .mx-lever{border-top:1px solid rgba(255,255,255,.10)}
+#moxie-afford .mx-darkzone .mx-lever b{color:#FFFFFF;font-weight:500}
+#moxie-afford .mx-darkzone .mx-lever i{color:var(--moxie-brand);font-size:14px}
+/* CTAs now sit on the light zone — restore the standard light-panel treatment */
+#moxie-afford .mx-darkzone .mx-cta2{background:var(--moxie-surface-alt);border-color:var(--moxie-primary);color:var(--moxie-primary)}
+#moxie-afford .mx-darkzone .mx-cta2:hover{background:var(--moxie-primary-20)}
+
+/* CTAs */
+#moxie-afford .mx-ctas{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+#moxie-afford .mx-cta1{background:var(--moxie-primary);color:#fff;font-weight:500;font-size:15px;padding:13px 22px;border-radius:9px;flex:1;min-width:170px;text-align:center;text-decoration:none;display:block}
+#moxie-afford .mx-cta1:hover{background:var(--moxie-primary-deep)}
+#moxie-afford .mx-cta2{border:1px solid var(--moxie-primary);color:var(--moxie-primary);font-weight:500;font-size:15px;padding:13px 22px;border-radius:9px;flex:1;min-width:170px;text-align:center;text-decoration:none;display:block;background:var(--moxie-surface-alt)}
+#moxie-afford .mx-cta2:hover{background:var(--moxie-primary-20)}
+
+/* mobile sticky */
+#moxie-afford .mx-mobilebar{display:none}
+@container (max-width:767px){
+  #moxie-afford .mx-inner{padding:16px 14px}
+  #moxie-afford.mx-revealed .mx-mobilebar{display:block;position:sticky;top:var(--moxie-header-offset);z-index:20;background:var(--moxie-surface);
+    margin:0 -14px 12px;padding:10px 14px;border-bottom:1px solid var(--moxie-ink-12)}
+  #moxie-afford .mx-mobilebar .mx-mb-in{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+  #moxie-afford .mx-mb-price{font-family:var(--moxie-display);font-weight:600;font-size:23px;letter-spacing:-.02em;color:var(--moxie-primary);font-variant-numeric:tabular-nums lining-nums}
+  #moxie-afford .mx-mb-pay{font-size:13px;color:var(--moxie-ink-60);font-variant-numeric:tabular-nums lining-nums}
+  #moxie-afford .mx-results{padding:18px 15px}
+  #moxie-afford .mx-inputs{padding:16px 15px}
+  #moxie-afford .mx-txt{max-width:132px}
+}
+@media (prefers-reduced-motion:reduce){
+  #moxie-afford *{transition:none!important;animation:none!important}
+}
+</style>
+
+<div class="mx-inner">
+
+<!-- ============================ HEADER ============================ -->
+<h2 class="mx-title">What can you comfortably afford?</h2>
+
+<!-- mobile sticky summary -->
+<div class="mx-mobilebar" aria-hidden="true">
+  <div class="mx-mb-in">
+    <span class="mx-mb-price" id="mxMbPrice">$0</span>
+    <span class="mx-mb-pay" id="mxMbPay">—</span>
+  </div>
+</div>
+
+<div class="mx-grid">
+
+  <!-- ========================== INPUTS ========================== -->
+  <div class="mx-leftcol">
+  <div class="mx-inputs">
+    <!-- 1. ZIP + credit score -->
+    <div class="mx-field mx-pair">
+      <div>
+        <div class="mx-lab"><label for="mxZip">ZIP code</label>
+          <button class="mx-help-btn" type="button" data-pop="pZip" aria-expanded="false" aria-controls="pZip"><span aria-hidden="true">?</span><span class="mx-sr">About ZIP code</span></button>
+        </div>
+        <div class="mx-pop" id="pZip">Sets the estimated property tax rate and home insurance for your area. You can override both under Advanced options.</div>
+        <input class="mx-txt mx-num mx-wide" id="mxZip" type="text" inputmode="numeric" maxlength="5" value="" placeholder="Optional" aria-describedby="mxZipNote">
+      </div>
+      <div>
+        <div class="mx-lab"><label for="mxCredit">Credit score</label>
+          <button class="mx-help-btn" type="button" data-pop="pCred" aria-expanded="false" aria-controls="pCred"><span aria-hidden="true">?</span><span class="mx-sr">About credit score</span></button>
+        </div>
+        <div class="mx-pop" id="pCred">An estimate is fine. It doesn't change the numbers here, but it helps a loan officer tell you which programs and rates you'd actually qualify for.</div>
+        <select class="mx-txt mx-wide" id="mxCredit">
+          <option value="760+">760 or higher</option>
+          <option value="720-759" selected>720 – 759</option>
+          <option value="680-719">680 – 719</option>
+          <option value="640-679">640 – 679</option>
+          <option value="below-640">Below 640</option>
+        </select>
+      </div>
+      <div class="mx-note mx-note-span" id="mxZipNote"><span id="mxZipPlace">National</span> estimates: <span class="mx-num" id="mxZipRate">1.10%</span> tax · <span class="mx-num" id="mxZipIns">$1,500</span>/yr insurance</div>
+    </div>
+
+    <!-- 2. Income -->
+    <div class="mx-field">
+      <div class="mx-lab"><label for="mxIncomeTxt">Yearly income before taxes</label>
+        <button class="mx-help-btn" type="button" data-pop="pInc" aria-expanded="false" aria-controls="pInc"><span aria-hidden="true">?</span><span class="mx-sr">About income</span></button>
+      </div>
+      <div class="mx-pop" id="pInc">Everything before taxes — salary, self-employment, tips, commissions, overtime, bonuses. Include co-borrower income.</div>
+      <div class="mx-inputrow">
+        <input class="mx-txt mx-num" id="mxIncomeTxt" type="text" inputmode="decimal" value="$95,000">
+        <input class="mx-range" id="mxIncome" type="range" min="20000" max="500000" step="1000" value="95000" aria-label="Yearly income before taxes">
+      </div>
+    </div>
+
+    <!-- 3. Cash -->
+    <div class="mx-field">
+      <div class="mx-lab"><label for="mxCashTxt">Cash to buy</label>
+        <button class="mx-help-btn" type="button" data-pop="pCash" aria-expanded="false" aria-controls="pCash"><span aria-hidden="true">?</span><span class="mx-sr">About cash to buy</span></button>
+      </div>
+      <div class="mx-pop" id="pCash">Savings, checking, retirement funds, gift money, and proceeds from a home sale. It covers both the down payment and closing costs.</div>
+      <div class="mx-inputrow">
+        <input class="mx-txt mx-num" id="mxCashTxt" type="text" inputmode="decimal" value="$40,000">
+        <input class="mx-range" id="mxCash" type="range" min="0" max="400000" step="1000" value="40000" aria-label="Cash to buy">
+      </div>
+    </div>
+
+    <!-- 4. Debts -->
+    <div class="mx-field">
+      <div class="mx-lab"><label for="mxDebtsTxt">Monthly debts</label>
+        <button class="mx-help-btn" type="button" data-pop="pDebt" aria-expanded="false" aria-controls="pDebt"><span aria-hidden="true">?</span><span class="mx-sr">About monthly debts</span></button>
+      </div>
+      <div class="mx-pop" id="pDebt">Credit card minimums, student loans, car payments, personal loans, child support. Not current rent or mortgage, and not living expenses like utilities, phone, or subscriptions.</div>
+      <div class="mx-inputrow">
+        <input class="mx-txt mx-num" id="mxDebtsTxt" type="text" inputmode="decimal" value="$500">
+        <input class="mx-range" id="mxDebts" type="range" min="0" max="6000" step="25" value="500" aria-label="Monthly debts">
+      </div>
+    </div>
+
+    <!-- 5. Rate -->
+    <div class="mx-field">
+      <div class="mx-lab"><label for="mxRateTxt">Interest rate</label>
+        <button class="mx-help-btn" type="button" data-pop="pRate" aria-expanded="false" aria-controls="pRate"><span aria-hidden="true">?</span><span class="mx-sr">About interest rate</span></button>
+      </div>
+      <div class="mx-pop" id="pRate">Set this to the rate you've been quoted. If you haven't been quoted one yet, leave it where it is and adjust once you have a real number.</div>
+      <div class="mx-inputrow">
+        <input class="mx-txt mx-num" id="mxRateTxt" type="text" inputmode="decimal" value="6.750%">
+        <input class="mx-range" id="mxRate" type="range" min="3" max="12" step="0.125" value="6.75" aria-label="Interest rate">
+      </div>
+    </div>
+
+    <button class="mx-reveal" type="button" id="mxReveal" aria-controls="mxResultsBody" aria-expanded="false">See what I can afford</button>
+
+    <!-- Advanced -->
+    <div class="mx-adv">
+      <button class="mx-adv-head" type="button" id="mxAdvBtn" aria-expanded="false" aria-controls="mxAdvBody">
+        <span class="mx-adv-title">Advanced options</span>
+        <span class="mx-adv-summary" id="mxAdvSummary">30-yr fixed · 1.10% tax · $1,500 insurance</span>
+      </button>
+      <div class="mx-adv-body" id="mxAdvBody">
+        <div class="mx-adv-grid">
+          <div><label for="mxTerm">Loan term</label><select id="mxTerm"><option value="30">30 years</option><option value="20">20 years</option><option value="15">15 years</option><option value="10">10 years</option></select></div>
+          <div><label for="mxType">Loan type</label><select id="mxType"><option>Fixed</option><option>5-1 ARM</option><option>7-1 ARM</option></select></div>
+          <div><label for="mxTax">Property tax rate (%)</label><input id="mxTax" type="text" inputmode="decimal" placeholder="auto"></div>
+          <div><label for="mxIns">Home insurance ($/yr)</label><input id="mxIns" type="text" inputmode="decimal" placeholder="auto"></div>
+          <div><label for="mxHoa">HOA dues ($/mo)</label><input id="mxHoa" type="text" inputmode="decimal" value="0"></div>
+          <div><label for="mxMi">Mortgage insurance</label><select id="mxMi"><option value="auto">Auto (est.)</option><option value="off">Off</option><option value="custom">Custom %</option></select></div>
+          <div><label for="mxMiPct">Custom MI (% /yr)</label><input id="mxMiPct" type="text" inputmode="decimal" placeholder="0.52" disabled></div>
+          <div><label for="mxDtiMax">DTI ceiling (%)</label><input id="mxDtiMax" type="text" inputmode="decimal" value="50"></div>
+          <div><label for="mxCc">Closing costs (% of price)</label><input id="mxCc" type="text" inputmode="decimal" value="3"></div>
+        </div>
+        <p style="font-size:12px;color:var(--moxie-ink-60);margin-top:14px;line-height:1.45">Loan type affects labeling only in this estimate. ARM payments shown are the initial fixed period.</p>
+      </div>
+    </div>
+  </div>
+
+  <section class="mxc-reviews" id="mxReviews" aria-labelledby="mxc-reviews-title" hidden>
+    <h2 class="mxc-reviews-title" id="mxc-reviews-title">
+      We know buying a home can be stressful.
+      <strong class="mxc-reviews-title-em">We&rsquo;re here to help you every step of the way.</strong>
+    </h2>
+
+    <div class="mxc-reviews-head">
+      <span class="mxc-reviews-brand">
+        <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/><path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>
+        <span class="mxc-reviews-brandtext">Google Reviews</span>
+      </span>
+      <span class="mxc-reviews-rating">
+        <span class="mxc-reviews-stars" aria-hidden="true">&#9733;&#9733;&#9733;&#9733;&#9733;</span>
+        <span class="mxc-reviews-score" id="mxcScore">5.0</span>
+      </span>
+    </div>
+
+    <div class="mxc-carousel" aria-roledescription="carousel" aria-label="Client reviews">
+      <ul class="mxc-carousel-track" id="mxcTrack"></ul>
+    </div>
+
+    <div class="mxc-carousel-controls" id="mxcControls">
+      <button type="button" class="mxc-carousel-toggle" id="mxcToggle" aria-pressed="false">Pause<span class="mxc-sr"> review carousel</span></button>
+      <div class="mxc-carousel-dots" id="mxcDots" role="tablist" aria-label="Choose review"></div>
+    </div>
+  </section>
+
+  </div><!-- /.mx-leftcol -->
+
+  <!-- ========================== RESULTS ========================== -->
+  <div class="mx-results mx-dark" id="mxResults">
+
+    <div id="mxPromo">
+      <div class="mx-promo-h">Find Your Ideal Pricepoint</div>
+      <ul class="mx-promo-list">
+        <li>Explore home prices and monthly payments.</li>
+        <li>Understand why what you can afford may differ from your prequalified amount.</li>
+        <li>Know your next best steps based on the numbers.</li>
+      </ul>
+      <p class="mx-promo-fine">No credit check, and no contact information required.</p>
+      <div class="mx-promo-brand">
+        <!-- [LOGO_REVERSED] replace this div with: <img src="LOGO-white.svg" alt="Moxie Mortgage" style="height:26px"> -->
+        <div class="mx-wordmark">Moxie Mortgage</div>
+        <div class="mx-promo-nmls mx-num">NMLS #1660690 · AZMB 0944059</div>
+      </div>
+    </div>
+
+    <div id="mxResultsBody" hidden>
+    <div aria-live="polite" aria-atomic="true" id="mxLive">
+      <div class="mx-price mx-num" id="mxPrice">$0</div>
+      <div class="mx-chip" id="mxBindChip"><i id="mxBindDot"></i><span id="mxBindText">—</span></div>
+    </div>
+
+    <!-- signature: comfort range slider -->
+    <div class="mx-comfort-head">
+      <span class="mx-comfort-lab">Comfort level</span>
+      <span class="mx-comfort-hint"><span aria-hidden="true">&#8596;</span> Drag to explore your range</span>
+    </div>
+
+    <div class="mx-comfort" id="mxComfort">
+      <div class="mx-tip mx-num" id="mxTip">$0</div>
+      <div class="mx-track">
+        <span style="flex:36.36;background:var(--moxie-zone-comfortable)"></span>
+        <span style="flex:31.82;background:var(--moxie-zone-moderate)"></span>
+        <span style="flex:31.82;background:var(--moxie-zone-stretching)"></span>
+      </div>
+      <input class="mx-comfort-input" id="mxDti" type="range" min="28" max="50" step="0.25" value="40"
+             role="slider" aria-label="Comfort level" aria-valuemin="28" aria-valuemax="50" aria-valuenow="40">
+      <div class="mx-handle" id="mxHandle" style="left:54.55%"><i></i><i></i></div>
+    </div>
+
+    <div class="mx-zonebar" id="mxZoneBar">
+      <button type="button" class="mx-zb" data-dti="32" style="flex:36.36">Conservative</button>
+      <button type="button" class="mx-zb" data-dti="39.5" style="flex:31.82">Moderate</button>
+      <button type="button" class="mx-zb" data-dti="46.5" style="flex:31.82">Stretching</button>
+    </div>
+
+    <div class="mx-ends">
+      <span><b class="mx-num" id="mxEndLow">$0</b> most conservative</span>
+      <span class="mx-zone-sub" id="mxZoneSub"></span>
+      <span><b class="mx-num" id="mxEndHigh">$0</b> absolute max</span>
+    </div>
+
+    <div class="mx-darkzone">
+
+    <!-- monthly payment -->
+    <div class="mx-block mx-block-first">
+      <div class="mx-payrow">
+        <span class="mx-pay mx-num" id="mxPay">$0</span>
+        <span class="mx-block-lab">Estimated monthly payment</span>
+      </div>
+      <div class="mx-bar" id="mxBar"></div>
+      <div class="mx-legend" id="mxLegend"></div>
+    </div>
+
+    <!-- cash breakdown -->
+    <div class="mx-block mx-block-cash">
+      <div id="mxCashRows"></div>
+      <div id="mxCashShort"></div>
+    </div>
+
+    <!-- levers -->
+    <div class="mx-levers-box">
+      <div class="mx-block-lab">What changes this</div>
+      <div id="mxLevers"></div>
+    </div>
+
+    <!-- CTAs -->
+    <div class="mx-ctas">
+      <a class="mx-cta1" id="mxCta1" href="https://apply.moxiemortgage.com" target="_blank" rel="noopener">Get pre-approved</a>
+      <a class="mx-cta2" id="mxCta2" href="mailto:hello@moxiemortgage.com?subject=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
+    </div>
+
+    </div><!-- /.mx-darkzone -->
+
+    </div><!-- /#mxResultsBody -->
+  </div>
+</div>
+
+</div><!-- /.mx-inner -->
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =========================================================================
+   CONFIG — the things a non-developer might change
+   ========================================================================= */
+var CONFIG = {
+  crmEndpoint:    null    // [CRM_ENDPOINT] — null = log to console
+};
+
+/* Opening position of the rate slider. The user is expected to change it.
+   This is NOT derived from credit score and is not presented as Moxie's
+   quoted rate — it is only a starting point so the calculator can show a
+   number before the user has entered anything. */
+var DEFAULT_RATE = 6.75;
+
+/* Mortgage insurance — one neutral model, no program branching.
+   Annual factor applied to loan amount, divided by 12. */
+var MI_TABLE = [
+  {maxLtv:0.80,  factor:0     },
+  {maxLtv:0.85,  factor:0.0032},
+  {maxLtv:0.90,  factor:0.0052},
+  {maxLtv:0.95,  factor:0.0078},
+  {maxLtv:1.00,  factor:0.0103}
+];
+
+var DEFAULTS = {
+  taxRate:0.011, insuranceAnnual:1500, closingCostPct:0.03,
+  minDownPct:0.03, dtiOpen:0.36, dtiFloor:0.28, dtiCeiling:0.50,
+  searchMax:5000000, searchIters:60
+};
+
+/* ZIP → state averages. Coarse by design: first-3-digit ranges.
+   National fallback is 1.1% tax / $1,500 insurance. Never blocks. */
+var ZIP_TABLE = [
+  [10,  27, "Massachusetts", 0.0114, 1600],
+  [28,  29, "Rhode Island", 0.0130, 1900],
+  [30,  38, "New Hampshire", 0.0177, 1300],
+  [39,  49, "Maine", 0.0124, 1300],
+  [50,  59, "Vermont", 0.0176, 1300],
+  [60,  69, "Connecticut", 0.0179, 1900],
+  [70,  89, "New Jersey", 0.0223, 1400],
+  [100, 149,"New York", 0.0140, 1700],
+  [150, 196,"Pennsylvania", 0.0141, 1300],
+  [197, 199,"Delaware", 0.0053, 1100],
+  [200, 205,"Washington DC", 0.0057, 1500],
+  [206, 219,"Maryland", 0.0099, 1600],
+  [220, 246,"Virginia", 0.0075, 1500],
+  [247, 268,"West Virginia", 0.0055, 1100],
+  [270, 289,"North Carolina", 0.0073, 1900],
+  [290, 299,"South Carolina", 0.0053, 1800],
+  [300, 319,"Georgia", 0.0083, 1900],
+  [320, 349,"Florida", 0.0083, 2400],
+  [350, 369,"Alabama", 0.0040, 1900],
+  [370, 385,"Tennessee", 0.0064, 1800],
+  [386, 397,"Mississippi", 0.0075, 2100],
+  [398, 399,"Georgia", 0.0083, 1900],
+  [400, 427,"Kentucky", 0.0083, 1700],
+  [430, 459,"Ohio", 0.0141, 1300],
+  [460, 479,"Indiana", 0.0083, 1400],
+  [480, 499,"Michigan", 0.0138, 1300],
+  [500, 528,"Iowa", 0.0149, 1700],
+  [530, 549,"Wisconsin", 0.0161, 1200],
+  [550, 567,"Minnesota", 0.0110, 1700],
+  [570, 577,"South Dakota", 0.0117, 2000],
+  [580, 588,"North Dakota", 0.0098, 1900],
+  [590, 599,"Montana", 0.0074, 2000],
+  [600, 629,"Illinois", 0.0207, 1500],
+  [630, 658,"Missouri", 0.0093, 1900],
+  [660, 679,"Kansas", 0.0133, 2400],
+  [680, 693,"Nebraska", 0.0154, 2400],
+  [700, 714,"Louisiana", 0.0055, 2500],
+  [716, 729,"Arkansas", 0.0059, 2000],
+  [730, 749,"Oklahoma", 0.0089, 2800],
+  [750, 799,"Texas", 0.0168, 2600],
+  [800, 816,"Colorado", 0.0051, 2100],
+  [820, 831,"Wyoming", 0.0056, 1500],
+  [832, 838,"Idaho", 0.0063, 1200],
+  [840, 847,"Utah", 0.0055, 1200],
+  [850, 865,"Arizona", 0.0062, 1400],
+  [870, 884,"New Mexico", 0.0073, 1700],
+  [889, 898,"Nevada", 0.0053, 1200],
+  [900, 961,"California", 0.0071, 1400],
+  [967, 968,"Hawaii", 0.0029, 1500],
+  [970, 979,"Oregon", 0.0093, 1000],
+  [980, 994,"Washington", 0.0094, 1300],
+  [995, 999,"Alaska", 0.0104, 1200]
+];
+
+/* =========================================================================
+   PURE CALCULATION BLOCK — no DOM access below this line until UI section
+   ========================================================================= */
+
+function monthlyPI(loan, annualRate, termYears){
+  var r = annualRate/12/100, n = termYears*12;
+  if(loan <= 0) return 0;
+  if(r === 0) return loan/n;
+  return loan * r / (1 - Math.pow(1+r, -n));
+}
+
+function miMonthly(loan, price, mode, customPct){
+  if(mode === "off" || price <= 0 || loan <= 0) return 0;
+  var ltv = loan/price;
+  if(mode === "custom") return ltv > 0.80 ? loan * (customPct/100) / 12 : 0;
+  for(var i=0;i<MI_TABLE.length;i++){
+    if(ltv <= MI_TABLE[i].maxLtv) return loan * MI_TABLE[i].factor / 12;
+  }
+  return loan * MI_TABLE[MI_TABLE.length-1].factor / 12;
+}
+
+/* Full monthly cost at a candidate price. */
+function costAt(price, s){
+  var closing = price * s.closingCostPct;
+  var down    = Math.max(0, s.cash - closing);
+  var loan    = Math.max(0, price - down);
+  var pi      = monthlyPI(loan, s.rate, s.term);
+  var taxes   = price * s.taxRate / 12;
+  var ins     = s.insuranceAnnual / 12;
+  var mi      = miMonthly(loan, price, s.miMode, s.miCustom);
+  return {closing:closing, down:down, loan:loan, pi:pi, taxes:taxes,
+          ins:ins, mi:mi, hoa:s.hoa, total:pi+taxes+ins+mi+s.hoa};
+}
+
+/* Largest price whose full monthly cost fits the housing budget.
+   Monotonic in price, so binary search converges. */
+function solveByDti(budget, s){
+  if(budget <= 0) return 0;
+  var lo = 0, hi = DEFAULTS.searchMax, mid;
+  for(var i=0;i<DEFAULTS.searchIters;i++){
+    mid = (lo+hi)/2;
+    if(costAt(mid, s).total <= budget) lo = mid; else hi = mid;
+    if(hi-lo < 1) break;
+  }
+  return lo;
+}
+
+/* Cash constraint has a closed form:
+   cash - closingPct*P >= minDownPct*P  ->  P <= cash / (closingPct + minDownPct) */
+function solveByCash(s){
+  var denom = s.closingCostPct + s.minDownPct;
+  return denom > 0 ? s.cash/denom : DEFAULTS.searchMax;
+}
+
+/* The whole model in one call. */
+function calculate(s){
+  var grossMonthly = s.income/12;
+  var budget = grossMonthly * s.dti - s.debts;
+  var byDti  = solveByDti(budget, s);
+  var byCash = solveByCash(s);
+  var price  = Math.min(byDti, byCash);
+  var binding = budget <= 0 ? "blocked" : (byCash < byDti ? "cash" : "income");
+  var c = costAt(price, s);
+  return {
+    price:price, budget:budget, grossMonthly:grossMonthly,
+    byDti:byDti, byCash:byCash, binding:binding, cost:c,
+    downPct: price>0 ? c.down/price : 0,
+    leftover: Math.max(0, s.cash - c.closing - c.down),
+    actualDti: grossMonthly>0 ? (c.total + s.debts)/grossMonthly : 0
+  };
+}
+
+function zoneFor(dti){
+  if(dti <= 0.36) return {key:"comfortable", name:"Conservative",
+    sub:"", css:"var(--moxie-zone-comfortable)"};
+  if(dti <= 0.43) return {key:"moderate", name:"Moderate",
+    sub:"", css:"var(--moxie-zone-moderate)"};
+  return {key:"stretching", name:"Stretching",
+    sub:"", css:"var(--moxie-zone-stretching)"};
+}
+
+function zipLookup(zip){
+  var p = parseInt(String(zip).slice(0,3), 10);
+  if(isNaN(p) || String(zip).length !== 5) return null;
+  for(var i=0;i<ZIP_TABLE.length;i++){
+    if(p >= ZIP_TABLE[i][0] && p <= ZIP_TABLE[i][1]){
+      return {place:ZIP_TABLE[i][2], taxRate:ZIP_TABLE[i][3], insurance:ZIP_TABLE[i][4]};
+    }
+  }
+  return null;
+}
+
+/* =========================================================================
+   STATE + UI
+   ========================================================================= */
+var $ = function(id){ return document.getElementById(id); };
+var root = document.getElementById("moxie-afford");
+/* Inside an iframe the frame itself scrolls with the page, so sticky elements
+   pin to the frame and appear frozen. Detect framing and turn sticky off. */
+if(window.parent !== window) root.classList.add("mx-framed");
+
+var state = {
+  zip:"", income:95000, cash:40000, debts:500, band:"720-759",
+  rate:DEFAULT_RATE, dti:0.40, term:30, loanType:"Fixed",
+  taxRate:DEFAULTS.taxRate, insuranceAnnual:DEFAULTS.insuranceAnnual,
+  taxOverride:null, insOverride:null, hoa:0,
+  miMode:"auto", miCustom:0.52,
+  dtiCeiling:DEFAULTS.dtiCeiling, closingCostPct:DEFAULTS.closingCostPct,
+  minDownPct:DEFAULTS.minDownPct
+};
+var changeCount = 0;
+var firstInteraction = false;
+var lastResult = null;
+
+/* --- analytics: one namespaced window object, console by default --- */
+window.moxieAfford = window.moxieAfford || {};
+window.moxieAfford.track = window.moxieAfford.track || function(evt, props){
+  if(window.dataLayer) window.dataLayer.push(Object.assign({event:evt}, props||{}));
+  else if(window.console) console.log("[moxie-afford]", evt, props||{});
+};
+var track = function(e,p){ try{ window.moxieAfford.track(e,p); }catch(err){} };
+
+/* --- formatting --- */
+function fmt$(n){ return "$" + Math.round(n).toLocaleString("en-US"); }
+function fmt$k(n){ return "$" + Math.round(n).toLocaleString("en-US"); }
+function parseNum(v){ var n = parseFloat(String(v).replace(/[^0-9.\-]/g,"")); return isNaN(n)?0:n; }
+function daysSince(iso){
+  var d = new Date(iso+"T00:00:00");
+  if(isNaN(d)) return 9999;
+  return Math.floor((Date.now()-d.getTime())/86400000);
+}
+function fmtDate(iso){
+  var d = new Date(iso+"T00:00:00");
+  if(isNaN(d)) return iso;
+  return d.toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+}
+
+/* --- ZIP --- */
+function applyZip(){
+  var z = zipLookup(state.zip);
+  if(state.taxOverride === null) state.taxRate = z ? z.taxRate : DEFAULTS.taxRate;
+  if(state.insOverride === null) state.insuranceAnnual = z ? z.insurance : DEFAULTS.insuranceAnnual;
+  $("mxZipPlace").textContent = z ? z.place : "National";
+  $("mxZipRate").textContent = (state.taxRate*100).toFixed(2) + "%";
+  $("mxZipIns").textContent  = fmt$(state.insuranceAnnual);
+}
+
+/* --- comfort slider geometry: 28→50 mapped across the 3 zone widths --- */
+function dtiToPct(dti){
+  return ((dti*100 - DEFAULTS.dtiFloor*100) / (state.dtiCeiling*100 - DEFAULTS.dtiFloor*100)) * 100;
+}
+
+/* --- count-up animation on the price --- */
+var priceAnim = null, shownPrice = 0;
+var reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function setPrice(target){
+  var el = $("mxPrice"), mb = $("mxMbPrice");
+  if(reduceMotion || Math.abs(target-shownPrice) < 1000){
+    shownPrice = target; el.textContent = fmt$(target); mb.textContent = fmt$(target); return;
+  }
+  if(priceAnim) cancelAnimationFrame(priceAnim);
+  var from = shownPrice, start = null, dur = 280;
+  function step(ts){
+    if(!start) start = ts;
+    var t = Math.min(1,(ts-start)/dur), e = 1-Math.pow(1-t,3);
+    var v = from + (target-from)*e;
+    el.textContent = fmt$(v); mb.textContent = fmt$(v);
+    if(t<1) priceAnim = requestAnimationFrame(step); else shownPrice = target;
+  }
+  priceAnim = requestAnimationFrame(step);
+}
+
+/* --- levers: compute real deltas, never fake --- */
+function levers(base){
+  var out = [];
+  function delta(mod){
+    var s2 = Object.assign({}, state);
+    mod(s2);
+    return calculate(s2).price - base.price;
+  }
+  var payoff = state.debts >= 200 ? 200 : state.debts;
+  if(payoff > 0){
+    var d1 = delta(function(s){ s.debts = state.debts - payoff; });
+    if(d1 > 1000) out.push({t:"Paying off "+fmt$(payoff)+"/mo of debt", v:d1});
+  }
+  var d2 = delta(function(s){ s.cash = state.cash + 10000; });
+  if(d2 > 1000) out.push({t:"Another "+fmt$(10000)+" in cash", v:d2});
+  var d3 = delta(function(s){ s.rate = Math.max(3, state.rate - 0.5); });
+  if(d3 > 1000) out.push({t:"A rate half a point lower", v:d3});
+  var d4 = delta(function(s){ s.income = state.income + 10000; });
+  if(d4 > 1000) out.push({t:"Another "+fmt$(10000)+" of yearly income", v:d4});
+
+  // order by what's actually binding, then by size
+  if(base.binding === "cash") out.sort(function(a,b){
+    return (b.t.indexOf("cash")>-1?1e9:0)+b.v - ((a.t.indexOf("cash")>-1?1e9:0)+a.v); });
+  else out.sort(function(a,b){ return b.v-a.v; });
+  return out.slice(0,2);
+}
+
+/* --- capture card state machine --- */
+function resultState(r){
+  if(r.binding === "blocked") return "blocked";
+  if(r.binding === "cash")    return "cash-limited";
+  if(state.dti > 0.43)        return "stretched";
+  if(state.dti <= 0.36 && r.price > 300000) return "strong";
+  return "healthy";
+}
+/* --- URL state --- */
+function writeUrl(){
+  try{
+    var p = new URLSearchParams();
+    p.set("z",state.zip); p.set("i",state.income); p.set("c",state.cash);
+    p.set("d",state.debts); p.set("b",state.band); p.set("r",state.rate);
+    p.set("t",Math.round(state.dti*10000)/100); p.set("y",state.term);
+    var url = location.pathname + "?" + p.toString();
+    history.replaceState(null,"",url);
+  }catch(e){}
+}
+function readUrl(){
+  try{
+    var p = new URLSearchParams(location.search);
+    if(!p.has("i")) return false;
+    if(p.get("z")) state.zip = p.get("z");
+    if(p.get("i")) state.income = parseNum(p.get("i"));
+    if(p.get("c")) state.cash = parseNum(p.get("c"));
+    if(p.get("d")) state.debts = parseNum(p.get("d"));
+    if(p.get("b")) state.band = p.get("b");
+    if(p.get("y")) state.term = parseNum(p.get("y"));
+    if(p.get("r")) state.rate = parseNum(p.get("r"));
+    if(p.get("t")) state.dti = parseNum(p.get("t"))/100;
+    return true;
+  }catch(e){ return false; }
+}
+
+/* =========================================================================
+   RENDER
+   ========================================================================= */
+function recalc(){
+  var r = calculate(state);
+  lastResult = r;
+  var zone = zoneFor(state.dti);
+  var blocked = r.binding === "blocked" || r.price < 1000;
+
+  // price + eyebrow
+  if(blocked){
+    $("mxPrice").textContent = "—";
+    shownPrice = 0;
+  } else {
+    setPrice(r.price);
+  }
+
+  // binding chip
+  var chip = $("mxBindChip"), dot = $("mxBindDot"), txt = $("mxBindText");
+  if(blocked){
+    chip.hidden = false;
+    txt.textContent = "Your debts use up the room lenders look for";
+    dot.style.background = "var(--moxie-zone-stretching)";
+  } else if(r.binding === "cash"){
+    chip.hidden = false;
+    txt.textContent = "Limited by your cash, not your income";
+    dot.style.background = "var(--moxie-zone-moderate)";
+  } else {
+    // income-limited is the ordinary case — say nothing
+    chip.hidden = true;
+  }
+
+  // comfort slider
+  var pct = dtiToPct(state.dti);
+  $("mxHandle").style.left = pct + "%";
+  $("mxTip").style.left = pct + "%";
+  $("mxTip").textContent = blocked ? "—" : fmt$(r.price) + "  ·  " + (state.dti*100).toFixed(0) + "%";
+  $("mxZoneSub").textContent = zone.sub;
+  var zi = zone.key === "comfortable" ? 0 : (zone.key === "moderate" ? 1 : 2);
+  $("mxComfort").setAttribute("data-zone", zi);
+  var zbs = $("mxZoneBar").children;
+  for(var q=0;q<zbs.length;q++) zbs[q].className = "mx-zb" + (q===zi ? " mx-on" : "");
+
+  // range endpoints: what the two ends of the track actually mean in dollars
+  var lo = calculate(Object.assign({}, state, {dti:DEFAULTS.dtiFloor})).price;
+  var hi = calculate(Object.assign({}, state, {dti:state.dtiCeiling})).price;
+  $("mxEndLow").textContent  = blocked ? "—" : fmt$(lo);
+  $("mxEndHigh").textContent = blocked ? "—" : fmt$(hi);
+  $("mxDti").setAttribute("aria-valuenow", (state.dti*100).toFixed(0));
+  $("mxDti").setAttribute("aria-valuetext",
+    (blocked? "no estimate available" : fmt$(r.price)) + ", " + zone.name +
+    ", " + (state.dti*100).toFixed(0) + " percent of income");
+
+  // payment + bar
+  var c = r.cost;
+  $("mxPay").textContent = blocked ? "—" : fmt$(c.total) + "/mo";
+  $("mxMbPay").textContent = blocked ? "—" : fmt$(c.total)+"/mo";
+  var parts = [
+    {k:"Principal & interest", v:c.pi,    col:"var(--moxie-brand)"},
+    {k:"Property tax",         v:c.taxes, col:"var(--moxie-primary)"},
+    {k:"Insurance",            v:c.ins,   col:"var(--moxie-accent)"},
+    {k:"Mortgage insurance",   v:c.mi,    col:"var(--moxie-ink-30)"},
+    {k:"HOA",                  v:c.hoa,   col:"var(--moxie-ink-60)"}
+  ].filter(function(p){ return p.v > 0.5; });
+  var tot = c.total || 1;
+  $("mxBar").innerHTML = blocked ? "" : parts.map(function(p){
+    return '<span style="flex:0 0 '+(p.v/tot*100)+'%;background:'+p.col+'" title="'+p.k+' '+fmt$(p.v)+'"></span>';
+  }).join("");
+  $("mxLegend").innerHTML = blocked ? "" : parts.map(function(p){
+    return '<div><i style="background:'+p.col+'"></i>'+p.k+' <b>'+fmt$(p.v)+'</b></div>';
+  }).join("");
+
+  // cash breakdown
+  var need = c.closing + Math.max(c.down, r.price*state.minDownPct);
+  var rows = "";
+  if(blocked){
+    rows = '<div class="mx-row"><span>Cash available</span><span class="mx-num">'+fmt$(state.cash)+'</span></div>'
+         + '<div class="mx-row"><span>Loan amount</span><span class="mx-num">—</span></div>';
+  } else {
+    rows += '<div class="mx-row"><span>Down payment<small>'+(r.downPct*100).toFixed(1)+'% of price</small></span><span class="mx-num">'+fmt$(c.down)+'</span></div>';
+    rows += '<div class="mx-row"><span>Closing costs<small>estimated at '+(state.closingCostPct*100).toFixed(1)+'% of price</small></span><span class="mx-num">'+fmt$(c.closing)+'</span></div>';
+    rows += '<div class="mx-row"><span>Loan amount<small>what you\'d borrow at this price</small></span><span class="mx-num">'+fmt$(c.loan)+'</span></div>';
+  }
+  $("mxCashRows").innerHTML = rows;
+  $("mxCashShort").innerHTML = (!blocked && r.binding === "cash")
+    ? '<div class="mx-short"><b>Your cash is what\'s holding this back, not your income.</b> Your income could support about '+fmt$(r.byDti)+', but at that price you\'d need roughly '+fmt$(r.byDti*(state.closingCostPct+state.minDownPct))+' in cash — about '+fmt$(Math.max(0,r.byDti*(state.closingCostPct+state.minDownPct)-state.cash))+' more than you have. Low-down-payment options exist and a loan officer can walk you through them.</div>'
+    : "";
+
+  // stats
+
+  // levers
+  if(blocked){
+    var need2 = Math.max(0, state.debts - (r.grossMonthly*state.dti));
+    $("mxLevers").innerHTML =
+      '<div class="mx-lever"><i>→</i><span>Your current debts use up the room lenders look for. Clearing about <b>'+fmt$(need2+50)+'/mo</b> of monthly debt payments would open a range here.</span></div>' +
+      '<div class="mx-lever"><i>→</i><span>Adding about <b>'+fmt$(Math.max(0,(state.debts+50)/state.dti*12 - state.income))+'</b> of yearly household income would do the same — a co-borrower counts.</span></div>';
+  } else {
+    var lv = levers(r);
+    $("mxLevers").innerHTML = lv.length ? lv.map(function(l){
+      return '<div class="mx-lever"><i>↑</i><span>'+l.t+' raises this range by about <b>'+fmt$(Math.round(l.v/1000)*1000)+'</b>.</span></div>';
+    }).join("") : '<div class="mx-lever"><span style="color:var(--moxie-ink-60)">You\'re already near the top of what this model estimates.</span></div>';
+  }
+
+  // advanced summary
+  $("mxAdvSummary").textContent = state.term+"-yr "+(state.loanType==="Fixed"?"fixed":state.loanType)+
+    " · "+(state.taxRate*100).toFixed(2)+"% tax · "+fmt$(state.insuranceAnnual)+" insurance"+
+    (state.hoa>0 ? " · "+fmt$(state.hoa)+" HOA" : "");
+
+  writeUrl();
+}
+
+/* debounce the live region so screen readers hear the settled value */
+var liveTimer = null;
+function announce(){
+  clearTimeout(liveTimer);
+  $("mxLive").setAttribute("aria-busy","true");
+  liveTimer = setTimeout(function(){ $("mxLive").setAttribute("aria-busy","false"); }, 500);
+}
+
+function onChange(field){
+  if(!firstInteraction){ firstInteraction = true; track("calc_first_interaction"); }
+  changeCount++;
+  track("calc_input_changed", {field:field});
+  recalc(); announce();
+}
+
+/* =========================================================================
+   WIRING
+   ========================================================================= */
+function bindPair(txtId, rangeId, key, opts){
+  var txt = $(txtId), rng = $(rangeId);
+  opts = opts || {};
+  function fromRange(){
+    state[key] = parseFloat(rng.value);
+    txt.value = opts.pct ? state[key].toFixed(3)+"%" : fmt$(state[key]);
+    if(opts.after) opts.after();
+    onChange(key);
+  }
+  function fromText(){
+    var v = parseNum(txt.value);
+    v = Math.min(parseFloat(rng.max), Math.max(parseFloat(rng.min), v));
+    state[key] = v; rng.value = v;
+    txt.value = opts.pct ? v.toFixed(3)+"%" : fmt$(v);
+    if(opts.after) opts.after();
+    onChange(key);
+  }
+  rng.addEventListener("input", fromRange);
+  txt.addEventListener("blur", fromText);
+  txt.addEventListener("keydown", function(e){ if(e.key === "Enter"){ e.preventDefault(); txt.blur(); } });
+}
+
+bindPair("mxIncomeTxt","mxIncome","income");
+bindPair("mxCashTxt","mxCash","cash");
+bindPair("mxDebtsTxt","mxDebts","debts");
+bindPair("mxRateTxt","mxRate","rate",{pct:true, after:function(){
+  track("calc_rate_changed", {rate: state.rate, credit_band: state.band});
+}});
+
+// ZIP
+$("mxZip").addEventListener("input", function(){
+  state.zip = this.value.replace(/[^0-9]/g,"").slice(0,5);
+  this.value = state.zip;
+  applyZip();
+  if(state.zip.length === 5 || state.zip.length === 0) onChange("zip");
+  else recalc();
+});
+
+// credit band
+$("mxCredit").addEventListener("change", function(){
+  state.band = this.value;
+  onChange("credit_band");
+});
+
+// comfort slider
+var comfort = $("mxComfort"), dtiInput = $("mxDti");
+dtiInput.addEventListener("input", function(){
+  state.dti = parseFloat(this.value)/100;
+  recalc(); announce();
+});
+dtiInput.addEventListener("change", function(){
+  track("calc_slider_moved", {zone: zoneFor(state.dti).key, dti: state.dti});
+  if(!firstInteraction){ firstInteraction = true; track("calc_first_interaction"); }
+  changeCount++;
+});
+$("mxZoneBar").addEventListener("click", function(e){
+  var b = e.target.closest(".mx-zb");
+  if(!b) return;
+  dtiInput.value = b.getAttribute("data-dti");
+  state.dti = parseFloat(dtiInput.value)/100;
+  recalc(); announce();
+  track("calc_slider_moved", {zone: zoneFor(state.dti).key, dti: state.dti, via:"zone_label"});
+  if(!firstInteraction){ firstInteraction = true; track("calc_first_interaction"); }
+  changeCount++;
+});
+
+dtiInput.addEventListener("pointerdown", function(){ comfort.classList.add("mx-dragging"); });
+window.addEventListener("pointerup", function(){ comfort.classList.remove("mx-dragging"); });
+dtiInput.addEventListener("focus", function(){ comfort.classList.add("mx-dragging"); });
+dtiInput.addEventListener("blur",  function(){ comfort.classList.remove("mx-dragging"); });
+dtiInput.addEventListener("keydown", function(e){
+  var step = e.shiftKey ? 2.5 : 0.25, v = parseFloat(this.value);
+  if(e.key==="Home"){ this.value = this.min; }
+  else if(e.key==="End"){ this.value = this.max; }
+  else if(e.shiftKey && (e.key==="ArrowRight"||e.key==="ArrowUp")){ this.value = Math.min(50, v+step); }
+  else if(e.shiftKey && (e.key==="ArrowLeft"||e.key==="ArrowDown")){ this.value = Math.max(28, v-step); }
+  else return;
+  e.preventDefault();
+  state.dti = parseFloat(this.value)/100; recalc(); announce();
+});
+
+// popovers
+root.addEventListener("click", function(e){
+  var b = e.target.closest(".mx-help-btn");
+  if(!b) return;
+  var p = $(b.getAttribute("data-pop"));
+  var open = p.classList.toggle("mx-open");
+  b.setAttribute("aria-expanded", open ? "true":"false");
+});
+
+// advanced
+$("mxAdvBtn").addEventListener("click", function(){
+  var b = $("mxAdvBody"), open = b.classList.toggle("mx-open");
+  this.setAttribute("aria-expanded", open?"true":"false");
+  if(open) track("calc_advanced_opened");
+});
+$("mxTerm").addEventListener("change", function(){ state.term = parseNum(this.value); onChange("term"); });
+$("mxType").addEventListener("change", function(){ state.loanType = this.value; onChange("loan_type"); });
+$("mxTax").addEventListener("blur", function(){
+  state.taxOverride = this.value.trim()===""?null:parseNum(this.value)/100;
+  if(state.taxOverride!==null) state.taxRate = state.taxOverride; else applyZip();
+  applyZip(); onChange("tax_override");
+});
+$("mxIns").addEventListener("blur", function(){
+  state.insOverride = this.value.trim()===""?null:parseNum(this.value);
+  if(state.insOverride!==null) state.insuranceAnnual = state.insOverride; else applyZip();
+  applyZip(); onChange("insurance_override");
+});
+$("mxHoa").addEventListener("blur", function(){ state.hoa = parseNum(this.value); onChange("hoa"); });
+$("mxMi").addEventListener("change", function(){
+  state.miMode = this.value;
+  $("mxMiPct").disabled = this.value !== "custom";
+  onChange("mi_mode");
+});
+$("mxMiPct").addEventListener("blur", function(){ state.miCustom = parseNum(this.value)||0.52; onChange("mi_custom"); });
+$("mxDtiMax").addEventListener("blur", function(){
+  var v = Math.min(60, Math.max(36, parseNum(this.value)||50));
+  this.value = v; state.dtiCeiling = v/100;
+  dtiInput.max = v; dtiInput.setAttribute("aria-valuemax", v);
+  if(state.dti*100 > v){ state.dti = v/100; dtiInput.value = v; }
+  onChange("dti_ceiling");
+});
+$("mxCc").addEventListener("blur", function(){
+  state.closingCostPct = Math.max(0, parseNum(this.value)||3)/100; onChange("closing_pct");
+});
+
+// CTAs — pass state so the application pre-fills
+function ctaParams(){
+  var r = lastResult || calculate(state);
+  var p = new URLSearchParams();
+  p.set("zip",state.zip); p.set("income",Math.round(state.income));
+  p.set("cash",Math.round(state.cash)); p.set("debts",Math.round(state.debts));
+  p.set("credit",state.band); p.set("rate",state.rate);
+  p.set("price",Math.round(r.price)); p.set("dti",(state.dti*100).toFixed(0));
+  p.set("zone",zoneFor(state.dti).key); p.set("constraint",r.binding);
+  p.set("source","affordability-calculator");
+  return p.toString();
+}
+$("mxCta1").addEventListener("click", function(){
+  this.href = "https://apply.moxiemortgage.com?" + ctaParams();
+  track("cta_clicked",{which:"pre_approval", result_state:resultState(lastResult)});
+});
+$("mxCta2").addEventListener("click", function(){
+  var r = lastResult || calculate(state);
+  var body =
+    "I'd like to speak with a loan officer about buying a home.\n\n" +
+    "Here's roughly where I landed on the affordability calculator:\n" +
+    "- Comfortable price: " + fmt$(r.price) + "\n" +
+    "- Estimated monthly payment: " + fmt$(r.cost.total) + "\n" +
+    "- Cash to buy: " + fmt$(state.cash) + "\n" +
+    "- Yearly income: " + fmt$(state.income) + "\n\n" +
+    "Please reach out when you have a moment. Thanks!";
+  this.href = "mailto:hello@moxiemortgage.com" +
+    "?subject=" + encodeURIComponent("I would like to speak with a Loan Officer") +
+    "&body=" + encodeURIComponent(body);
+  track("cta_clicked",{which:"loan_officer", result_state:resultState(lastResult)});
+});
+
+// reveal: one-time. After this the panel stays live on every input change.
+function reveal(scroll){
+  if(root.classList.contains("mx-revealed")) return;
+  root.classList.add("mx-revealed");
+  $("mxPromo").hidden = true;
+  $("mxResults").classList.remove("mx-dark");
+  $("mxResultsBody").hidden = false;
+  var btn = $("mxReveal");
+  btn.setAttribute("aria-expanded","true");
+  btn.hidden = true;
+  recalc();
+  showReviews();
+  track("calc_revealed", {result_state: resultState(lastResult)});
+  if(scroll){
+    try{
+      var r = $("mxResults").getBoundingClientRect();
+      if(r.top < 0 || r.top > window.innerHeight*0.6){
+        $("mxResults").scrollIntoView({behavior: reduceMotion ? "auto":"smooth", block:"start"});
+      }
+    }catch(e){}
+    $("mxPrice").setAttribute("tabindex","-1");
+    $("mxPrice").focus({preventScroll:true});
+  }
+}
+$("mxReveal").addEventListener("click", function(){
+  if(!firstInteraction){ firstInteraction = true; track("calc_first_interaction"); }
+  reveal(true);
+});
+
+/* =========================================================================
+   REVIEWS CAROUSEL — vanilla port of the standalone Reviews component.
+   Same 6s auto-advance, pause on hover/focus/tab-hidden, explicit toggle,
+   and prefers-reduced-motion start-paused behavior. Built into the left
+   column; shown once the calculator is revealed.
+   ========================================================================= */
+var REVIEWS_DATA = {
+  rating: "5.0",
+  count: "",
+  source: "Google",
+  profileUrl: "https://www.google.com/maps/search/?api=1&query=Moxie+Mortgage&query_place_id=",
+  reviews: [
+    { quote: "Moxie facilitated a remarkably seamless home-buying experience — exceptional service and expertise. I would recommend their team without reservation.", name: "Moxie client", rating: 5 },
+    { quote: "Outstanding! Very responsive — we were able to get in touch within minutes, even over the weekends.", name: "Moxie client", rating: 5 },
+    { quote: "An absolute godsend as my husband and I navigated becoming first-time homeowners — endlessly patient, and explained everything in a way we could understand.", name: "Moxie client", rating: 5 },
+    { quote: "We decided to close 30 days early and they pulled it off — great communication and follow-through the whole way, with better rates than competitors.", name: "Moxie client", rating: 5 },
+    { quote: "She went above and beyond to get my mortgage approved in an incredibly short timeframe — just 10 days — in a situation that was both unique and stressful.", name: "Moxie client", rating: 5 }
+  ]
+};
+
+var reviewsStarted = false;
+function showReviews(){
+  if(reviewsStarted) return;
+  reviewsStarted = true;
+  buildReviews(REVIEWS_DATA);
+}
+
+function reviewEsc(str){
+  return String(str).replace(/[&<>"']/g, function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+  });
+}
+
+function buildReviews(data){
+  var box = $("mxReviews");
+  var track = $("mxcTrack");
+  var dotsWrap = $("mxcDots");
+  var controls = $("mxcControls");
+  var toggle = $("mxcToggle");
+  var count = data.reviews.length;
+  var index = 0;
+  var profileUrl = data.profileUrl || "#";
+
+  $("mxcScore").textContent = data.rating + (data.count && data.count.trim() ? " \u00b7 " + data.count + " reviews" : "");
+
+  var gLogo = '<svg class="mxc-review-g" width="16" height="16" viewBox="0 0 48 48" aria-hidden="true" focusable="false"><path fill="#4285F4" d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"/><path fill="#34A853" d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"/><path fill="#FBBC05" d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"/><path fill="#EA4335" d="M24 10.75c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 4.18 29.93 2 24 2 15.4 2 7.96 6.93 4.34 14.12l7.35 5.7c1.73-5.2 6.58-9.07 12.31-9.07z"/></svg>';
+
+  track.innerHTML = data.reviews.map(function(rv, i){
+    var avatar = rv.photoUrl
+      ? '<img class="mxc-review-avatar" src="'+reviewEsc(rv.photoUrl)+'" alt="" width="36" height="36" referrerpolicy="no-referrer" loading="lazy">'
+      : '<span class="mxc-review-avatar mxc-review-avatar-fallback" aria-hidden="true">'+reviewEsc(rv.name.charAt(0))+'</span>';
+    var sub = (rv.relativeTime ? reviewEsc(rv.relativeTime)+" \u00b7 " : "") + "on Google";
+    return '<li class="mxc-carousel-slide" aria-hidden="'+(i!==index)+'" aria-roledescription="slide" aria-label="Review '+(i+1)+' of '+count+'">' +
+      '<a class="mxc-review-card" href="'+reviewEsc(profileUrl)+'" target="_blank" rel="noopener noreferrer" tabindex="'+(i===index?0:-1)+'"'+(data.profileUrl?'':' data-nohref="1"')+'>' +
+        '<p class="mxc-review-quote">\u201c'+reviewEsc(rv.quote)+'\u201d</p>' +
+        '<div class="mxc-review-author">'+avatar+
+          '<span class="mxc-review-meta"><span class="mxc-review-name">'+reviewEsc(rv.name)+'</span>' +
+          '<span class="mxc-review-sub">'+sub+'</span></span>'+gLogo+
+        '</div>' +
+      '</a></li>';
+  }).join("");
+
+  if(count > 1){
+    dotsWrap.innerHTML = data.reviews.map(function(_, i){
+      return '<button type="button" role="tab" aria-selected="'+(i===index)+'" aria-label="Review '+(i+1)+'" class="mxc-carousel-dot'+(i===index?' is-active':'')+'" data-i="'+i+'"></button>';
+    }).join("");
+  } else {
+    controls.hidden = true;
+  }
+
+  var slides = track.children;
+  var dots = dotsWrap.children;
+  function render(){
+    track.style.transform = "translateX(-"+(index*100)+"%)";
+    for(var i=0;i<slides.length;i++){
+      slides[i].setAttribute("aria-hidden", String(i!==index));
+      var a = slides[i].querySelector(".mxc-review-card");
+      if(a) a.tabIndex = (i===index ? 0 : -1);
+    }
+    for(var d=0;d<dots.length;d++){
+      var on = (d===index);
+      dots[d].className = "mxc-carousel-dot" + (on ? " is-active" : "");
+      dots[d].setAttribute("aria-selected", String(on));
+    }
+  }
+
+  // two independent pause conditions, matching the component's intent
+  var hovered = false, tabHidden = false;
+  var paused = reduceMotion;                 // start paused if reduced motion
+  toggle.setAttribute("aria-pressed", String(paused));
+  toggle.firstChild ? (toggle.childNodes[0].nodeValue = paused ? "Play" : "Pause") : null;
+
+  var timer = null;
+  function tick(){ if(!hovered && !tabHidden){ index = (index+1) % count; render(); } }
+  function arm(){
+    if(timer){ clearInterval(timer); timer = null; }
+    if(!paused && count > 1) timer = setInterval(tick, 6000);
+  }
+
+  box.addEventListener("mouseenter", function(){ hovered = true; });
+  box.addEventListener("mouseleave", function(){ hovered = false; });
+  box.addEventListener("focusin",  function(){ hovered = true; });
+  box.addEventListener("focusout", function(){ hovered = false; });
+  document.addEventListener("visibilitychange", function(){ tabHidden = document.hidden; });
+
+  toggle.addEventListener("click", function(){
+    paused = !paused;
+    this.setAttribute("aria-pressed", String(paused));
+    this.childNodes[0].nodeValue = paused ? "Play" : "Pause";
+    arm();
+  });
+
+  dotsWrap.addEventListener("click", function(e){
+    var b = e.target.closest("[data-i]");
+    if(!b) return;
+    index = parseInt(b.getAttribute("data-i"), 10);
+    render();
+  });
+
+  track.addEventListener("click", function(e){
+    var a = e.target.closest(".mxc-review-card");
+    if(a && a.getAttribute("data-nohref")) e.preventDefault();
+  });
+
+  box.hidden = false;
+  render();
+  arm();
+}
+
+/* Tabular-figure check. Barlow's tnum feature is not reliably delivered
+   through the Google Fonts API, and the price counter animates, so jittering
+   digits would be visible. This logs a warning if the feature isn't active. */
+function checkTabularFigures(){
+  try{
+    var probe = document.createElement("span");
+    probe.className = "mx-num";
+    probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:40px";
+    root.appendChild(probe);
+    probe.textContent = "1111111111"; var w1 = probe.getBoundingClientRect().width;
+    probe.textContent = "0000000000"; var w0 = probe.getBoundingClientRect().width;
+    root.removeChild(probe);
+    if(Math.abs(w1-w0) > 0.5 && window.console){
+      console.warn("[moxie-afford] Tabular figures are NOT active in this font. "+
+        "Digits will shift width as the price animates. Fix: use a font that "+
+        "delivers the 'tnum' feature, or set --moxie-body/--moxie-display to a "+
+        "fallback for numbers.");
+    }
+  }catch(e){}
+}
+
+/* =========================================================================
+   BOOT
+   ========================================================================= */
+function boot(){
+  var fromUrl = readUrl();
+  if(fromUrl){
+    $("mxZip").value = state.zip;
+    $("mxIncome").value = state.income; $("mxIncomeTxt").value = fmt$(state.income);
+    $("mxCash").value = state.cash;     $("mxCashTxt").value = fmt$(state.cash);
+    $("mxDebts").value = state.debts;   $("mxDebtsTxt").value = fmt$(state.debts);
+    $("mxTerm").value = state.term;
+    $("mxDti").value = state.dti*100;
+    $("mxCredit").value = state.band;
+  }
+  if(fromUrl) reveal(false);
+  applyZip();
+  $("mxRate").value = state.rate;
+  $("mxRateTxt").value = state.rate.toFixed(3)+"%";
+  recalc();
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(checkTabularFigures);
+  else checkTabularFigures();
+}
+
+boot();
+
+/* =========================================================================
+   IFRAME HEIGHT REPORTING
+   Harmless when the file is embedded inline (window === window.parent, so
+   nothing is posted). When hosted on GitHub Pages and framed, this tells the
+   parent page how tall to make the frame. Parent-side listener is in the
+   comment block at the top of this file.
+   ========================================================================= */
+(function(){
+  if(window.parent === window) return;      // not framed — do nothing
+  var last = 0;
+  function report(){
+    var h = Math.ceil(root.getBoundingClientRect().height);
+    if(Math.abs(h-last) < 2) return;
+    last = h;
+    try{ window.parent.postMessage({type:"moxie-afford:height", height:h}, "*"); }catch(e){}
+  }
+  if(window.ResizeObserver){ new ResizeObserver(report).observe(root); }
+  window.addEventListener("load", report);
+  setInterval(report, 1000);                // cheap safety net for late reflows
+  report();
+})();
+
+})();
+</script>

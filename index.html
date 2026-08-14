@@ -635,7 +635,7 @@
     <!-- CTAs -->
     <div class="mx-ctas">
       <a class="mx-cta1" id="mxCta1" href="https://apply.moxiemortgage.com" target="_blank" rel="noopener">Get pre-approved</a>
-      <a class="mx-cta2" id="mxCta2" href="mailto:hello@moxiemortgage.com?subject=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
+      <a class="mx-cta2" id="mxCta2" target="_top" href="mailto:hello@moxiemortgage.com?subject=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
     </div>
 
     </div><!-- /.mx-darkzone -->
@@ -1079,6 +1079,7 @@ function recalc(){
     " · "+(state.taxRate*100).toFixed(2)+"% tax · "+fmt$(state.insuranceAnnual)+" insurance"+
     (state.hoa>0 ? " · "+fmt$(state.hoa)+" HOA" : "");
 
+  if(document.getElementById('mxCta2')) updateLoanOfficerMailto();
   writeUrl();
 }
 
@@ -1242,7 +1243,7 @@ $("mxCta1").addEventListener("click", function(){
   this.href = "https://apply.moxiemortgage.com?" + ctaParams();
   track("cta_clicked",{which:"pre_approval", result_state:resultState(lastResult)});
 });
-$("mxCta2").addEventListener("click", function(){
+function updateLoanOfficerMailto(){
   var r = lastResult || calculate(state);
   var body =
     "I'd like to speak with a loan officer about buying a home.\n\n" +
@@ -1252,9 +1253,12 @@ $("mxCta2").addEventListener("click", function(){
     "- Cash to buy: " + fmt$(state.cash) + "\n" +
     "- Yearly income: " + fmt$(state.income) + "\n\n" +
     "Please reach out when you have a moment. Thanks!";
-  this.href = "mailto:hello@moxiemortgage.com" +
+  $("mxCta2").href = "mailto:hello@moxiemortgage.com" +
     "?subject=" + encodeURIComponent("I would like to speak with a Loan Officer") +
     "&body=" + encodeURIComponent(body);
+}
+$("mxCta2").addEventListener("click", function(){
+  // href is already current (kept fresh in recalc); this only logs the click.
   track("cta_clicked",{which:"loan_officer", result_state:resultState(lastResult)});
 });
 

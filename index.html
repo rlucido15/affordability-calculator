@@ -637,7 +637,7 @@
     <!-- CTAs -->
     <div class="mx-ctas">
       <a class="mx-cta1" id="mxCta1" href="https://apply.moxiemortgage.com" target="_blank" rel="noopener">Get pre-approved</a>
-      <a class="mx-cta2" id="mxCta2" target="_top" href="mailto:hello@moxiemortgage.com?subject=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
+      <a class="mx-cta2" id="mxCta2" target="_blank" rel="noopener" href="https://mail.google.com/mail/?view=cm&fs=1&to=hello%40moxiemortgage.com&su=I%20would%20like%20to%20speak%20with%20a%20Loan%20Officer">Talk to a loan officer</a>
     </div>
     <div class="mx-cta2note" id="mxCta2Note" role="status" hidden></div>
 
@@ -1246,7 +1246,7 @@ $("mxCta1").addEventListener("click", function(){
   this.href = "https://apply.moxiemortgage.com?" + ctaParams();
   track("cta_clicked",{which:"pre_approval", result_state:resultState(lastResult)});
 });
-function loanOfficerMailtoHref(){
+function loanOfficerGmailHref(){
   var r = lastResult || calculate(state);
   var body =
     "I'd like to speak with a loan officer about buying a home.\n\n" +
@@ -1256,34 +1256,29 @@ function loanOfficerMailtoHref(){
     "- Cash to buy: " + fmt$(state.cash) + "\n" +
     "- Yearly income: " + fmt$(state.income) + "\n\n" +
     "Please reach out when you have a moment. Thanks!";
-  return "mailto:hello@moxiemortgage.com" +
-    "?subject=" + encodeURIComponent("I would like to speak with a Loan Officer") +
+  // Gmail in-browser compose — works in a tab without a desktop mail client.
+  return "https://mail.google.com/mail/?view=cm&fs=1" +
+    "&to=" + encodeURIComponent("hello@moxiemortgage.com") +
+    "&su=" + encodeURIComponent("I would like to speak with a Loan Officer") +
     "&body=" + encodeURIComponent(body);
 }
 function updateLoanOfficerMailto(){
-  $("mxCta2").href = loanOfficerMailtoHref();
+  // keep the anchor href current as a right-click / middle-click target
+  $("mxCta2").href = loanOfficerGmailHref();
 }
 $("mxCta2").addEventListener("click", function(e){
   track("cta_clicked",{which:"loan_officer", result_state:resultState(lastResult)});
-  var href = loanOfficerMailtoHref();
-  // Inside an iframe the anchor's default navigation is often swallowed, so
-  // drive it explicitly. Try the top window first (escapes the frame), then a
-  // normal assign, then a blank-tab open. If everything is blocked, fall back
-  // to copying the address so the click is never a dead end.
   e.preventDefault();
+  var href = loanOfficerGmailHref();
+  // Open Gmail compose in a new tab. If the browser blocks the popup, fall back
+  // to copying the address so the click is never a dead end.
   var opened = false;
-  try { if (window.top && window.top !== window) { window.top.location.href = href; opened = true; } } catch (err) {}
-  if (!opened) { try { window.location.href = href; opened = true; } catch (err) {} }
-  if (!opened) { try { var w = window.open(href, "_blank"); opened = !!w; } catch (err) {} }
+  try { var w = window.open(href, "_blank", "noopener"); opened = !!w; } catch (err) {}
   if (!opened) {
     var addr = "hello@moxiemortgage.com";
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(addr);
-      }
-    } catch (err) {}
+    try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(addr); } catch (err) {}
     var note = $("mxCta2Note");
-    if (note) { note.textContent = "Couldn't open your email app. Copied " + addr + " to your clipboard."; note.hidden = false; }
+    if (note) { note.textContent = "Popup blocked. Email us at " + addr + " (copied to your clipboard)."; note.hidden = false; }
   }
 });
 
